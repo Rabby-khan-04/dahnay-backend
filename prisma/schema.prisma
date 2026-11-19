@@ -1,0 +1,334 @@
+// DahNAY backend — Prisma schema for MongoDB
+// Generated from scraped/cms/content-model.types.ts (the source of truth).
+//
+// MongoDB notes:
+//   * Prisma v7 does not support MongoDB yet — this project pins Prisma 6.19.
+//   * Every document id maps to MongoDB's _id as an ObjectId.
+//   * Embedded composite types (`type ...`) cannot hold Prisma relations, so
+//     ids inside embedded blocks are plain ObjectId strings validated in the
+//     admin write path (Zod + existence check). Top-level image fields are
+//     real @relation fields.
+//   * MongoDB needs a replica set for Prisma's nested writes/transactions.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- enums
+
+enum PageType {
+  HOME
+  SOLUTION
+  ABOUT
+  NEWSROOM
+  CONTACT
+  INDUSTRY
+}
+
+enum PageVariant {
+  LOGISTICS
+  LINES
+  PORTS_INFRA
+  WHO_WE_ARE
+  ESG_CSR
+  CAREERS
+  BLOG
+  CASE_STUDY
+  NEWS
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum SolutionKind {
+  LOGISTICS
+  LINES
+  PORTS_INFRA
+}
+
+enum ArticleType {
+  BLOG
+  CASE_STUDY
+  NEWS
+}
+
+enum MediaKind {
+  IMAGE
+  VIDEO
+}
+
+enum BlockType {
+  HERO
+  INTRO
+  SERVICES
+  INDUSTRIES
+  ICON_CARDS
+  GPTW
+  NEWSROOM
+  CTA
+  FAQ
+  CONTACT_FORM
+  BANNER
+  SOLUTION_GRID
+  FEATURE_LIST
+  PROFILE
+  CONTENT_BLOCK
+  CAREER_FORM
+  ARTICLE_LIST
+  NEWSLETTER_CTA
+  CONTACT_STATS
+  OFFICE_LIST
+  BREADCRUMB
+  ARTICLE_BODY
+}
+
+enum ContactKind {
+  PHONE
+  EMAIL
+}
+
+enum ArticleBlockType {
+  HEADING
+  PARAGRAPH
+  IMAGE
+}
+
+// ------------------------------------------------- embedded composite types
+
+type LinkItem {
+  label String
+  href  String
+}
+
+type SeoFields {
+  title       String?
+  description String?
+  canonical   String?
+  robots      String?
+  ogImageId   String? // ObjectId as string (embedded — no relation possible)
+}
+
+type PostalAddress {
+  street     String
+  locality   String
+  region     String
+  postalCode String
+  country    String
+}
+
+type ContactInfo {
+  email     String
+  phone     String?
+  address   PostalAddress
+  languages String[]
+}
+
+type SocialLinks {
+  facebook  String?
+  linkedin  String?
+  instagram String?
+  x         String?
+}
+
+type FooterColumn {
+  heading String
+  links   LinkItem[]
+}
+
+type FooterInfo {
+  columns          FooterColumn[]
+  popularLinksText String
+  copyright        String
+  legalLinks       LinkItem[]
+  madeBy           String
+}
+
+type BrandInfo {
+  name        String
+  legalName   String
+  tagline     String
+  description String
+  foundedYear Int
+  founder     String
+}
+
+type Stat {
+  value String
+  label String
+}
+
+type Section {
+  id        String
+  type      BlockType
+  visible   Boolean
+  sortOrder Int
+  content   Json // shape validated by the Zod SectionContent union
+}
+
+type SolutionDetail {
+  intro    String
+  sections Section[]
+}
+
+type ArticleBlock {
+  type    ArticleBlockType
+  level   Int?
+  text    String?
+  imageId String? // ObjectId as string (embedded)
+  alt     String?
+}
+
+type ArticleDetail {
+  body ArticleBlock[]
+}
+
+type IndustryDetail {
+  intro    String
+  sections Section[]
+}
+
+type OfficeContact {
+  type  ContactKind
+  value String
+  href  String?
+}
+
+// --------------------------------------------------------------- models
+
+/// Media library — stored once, referenced by id everywhere.
+model Media {
+  id         String     @id @default(auto()) @map("_id") @db.ObjectId
+  kind       MediaKind
+  src        String
+  alt        String?
+  width      Int?
+  height     Int?
+  mime       String?
+  title      String?
+  posterId   String?    @db.ObjectId
+  poster     Media?     @relation("MediaPoster", fields: [posterId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  posterOf   Media[]    @relation("MediaPoster")
+  solutions  Solution[] @relation("SolutionImage")
+  articles   Article[]  @relation("ArticleCover")
+  industries Industry[] @relation("IndustryImage")
+  createdAt  DateTime   @default(now())
+
+  @@index([kind])
+}
+
+/// Real pages only (home, 3 solutions, 3 about, 3 newsroom, contact, industries).
+model Page {
+  id          String        @id @default(auto()) @map("_id") @db.ObjectId
+  type        PageType
+  variant     PageVariant?
+  slug        String
+  path        String        @unique
+  title       String
+  status      ContentStatus @default(DRAFT)
+  parentId    String?       @db.ObjectId
+  parent      Page?         @relation("PageHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children    Page[]        @relation("PageHierarchy")
+  sortOrder   Int           @default(0)
+  seo         SeoFields
+  sections    Section[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  publishedAt DateTime?
+
+  @@unique([type, slug])
+  @@index([status, sortOrder])
+}
+
+/// One data table for all solution kinds; listing pages filter by `kind`.
+model Solution {
+  id               String         @id @default(auto()) @map("_id") @db.ObjectId
+  kind             SolutionKind
+  slug             String
+  title            String
+  shortDescription String
+  imageId          String         @db.ObjectId
+  image            Media          @relation("SolutionImage", fields: [imageId], references: [id])
+  detail           SolutionDetail
+  status           ContentStatus  @default(DRAFT)
+  sortOrder        Int            @default(0)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([kind, slug])
+  @@index([kind, status, sortOrder])
+}
+
+/// One data table for blog / case-study / news; detail resolved by (type, slug).
+model Article {
+  id           String        @id @default(auto()) @map("_id") @db.ObjectId
+  type         ArticleType
+  slug         String
+  title        String
+  excerpt      String
+  coverImageId String        @db.ObjectId
+  cover        Media         @relation("ArticleCover", fields: [coverImageId], references: [id])
+  badge        String?
+  publishedAt  DateTime?
+  modifiedAt   DateTime?
+  author       String?
+  tags         String[]
+  detail       ArticleDetail
+  status       ContentStatus @default(DRAFT)
+  sortOrder    Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([type, slug])
+  @@index([type, publishedAt])
+  @@index([type, status])
+}
+
+/// Office rows — fetched by the contact page's officeList block.
+model Location {
+  id        String          @id @default(auto()) @map("_id") @db.ObjectId
+  city      String
+  country   String
+  address   String
+  contacts  OfficeContact[]
+  status    ContentStatus   @default(DRAFT)
+  sortOrder Int             @default(0)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([country, sortOrder])
+}
+
+/// Industry rows — detail resolved by slug at /industries/{slug}.
+model Industry {
+  id               String         @id @default(auto()) @map("_id") @db.ObjectId
+  slug             String         @unique
+  title            String
+  shortDescription String
+  imageId          String         @db.ObjectId
+  image            Media          @relation("IndustryImage", fields: [imageId], references: [id])
+  detail           IndustryDetail
+  status           ContentStatus  @default(DRAFT)
+  sortOrder        Int            @default(0)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([status, sortOrder])
+}
+
+/// Singleton: brand, contact, socials, footer and default SEO — edit once.
+model WebsiteInformation {
+  id          String      @id @default(auto()) @map("_id") @db.ObjectId
+  brand       BrandInfo
+  contact     ContactInfo
+  social      SocialLinks
+  footer      FooterInfo
+  seoDefaults SeoFields
+  updatedAt   DateTime    @updatedAt
+}
