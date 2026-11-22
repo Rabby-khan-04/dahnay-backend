@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import { ApiCookieAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Public } from "../auth/decorators/public.decorator.js";
+import { Roles } from "../auth/decorators/roles.decorator.js";
 import { ResponseMessage } from "../common/decorators/response-message.decorator.js";
 import { ApiEnvelope } from "../common/swagger/api-envelope.decorator.js";
 import { objectIdSchema } from "../common/validation/object-id.js";
@@ -44,6 +45,7 @@ export class SolutionController {
 
   @Post()
   @HttpCode(201)
+  @Roles("ADMIN")
   @ResponseMessage(SOLUTION_MESSAGES.CREATED)
   @ApiOperation({ summary: "Create a solution" })
   @ApiEnvelope(SolutionDto.Item, { status: 201 })
@@ -52,6 +54,7 @@ export class SolutionController {
   }
 
   @Put(":id")
+  @Roles("ADMIN")
   @ResponseMessage(SOLUTION_MESSAGES.UPDATED)
   @ApiOperation({ summary: "Update a solution" })
   @ApiEnvelope(SolutionDto.Item)
@@ -63,6 +66,7 @@ export class SolutionController {
   }
 
   @Delete(":id")
+  @Roles("ADMIN")
   @ResponseMessage(SOLUTION_MESSAGES.DELETED)
   @ApiOperation({ summary: "Delete a solution" })
   @ApiEnvelope(null)

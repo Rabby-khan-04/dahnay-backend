@@ -7,4 +7,5 @@ export const AUTH_MESSAGES = {
   INVALID_CREDENTIALS: "Invalid credentials",
   NOT_AUTHENTICATED: "Not authenticated",
   INVALID_TOKEN: "Invalid or expired token",
+  FORBIDDEN: "Admin access required",
 } as const;

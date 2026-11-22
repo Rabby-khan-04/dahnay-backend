@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { objectIdSchema } from "../common/validation/object-id.js";
 import { paginationQuerySchema } from "../common/pagination/pagination.js";
+import { ImageObject } from "../media/media.validation.js";
 
 export const SolutionKind = z.enum(["LOGISTICS", "LINES", "PORTS_INFRA"]);
 export type SolutionKind = z.infer<typeof SolutionKind>;
@@ -85,7 +86,7 @@ export const Item = z.object({
   slug: z.string(),
   title: z.string(),
   shortDescription: z.string(),
-  imageId: z.string(),
+  image: ImageObject.nullable(),
   detail: z.object({
     intro: z.string(),
     sections: z.array(
