@@ -11,7 +11,8 @@
 //   * MongoDB needs a replica set for Prisma's nested writes/transactions.
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
@@ -20,6 +21,11 @@ datasource db {
 }
 
 // ---------------------------------------------------------------- enums
+
+enum Role {
+  USER
+  ADMIN
+}
 
 enum PageType {
   HOME
@@ -331,4 +337,17 @@ model WebsiteInformation {
   footer      FooterInfo
   seoDefaults SeoFields
   updatedAt   DateTime    @updatedAt
+}
+
+/// Admin/dashboard users (cookie JWT auth).
+model User {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("users")
 }
