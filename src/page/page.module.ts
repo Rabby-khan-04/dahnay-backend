@@ -5,5 +5,6 @@ import { PageService } from "./page.service.js";
 @Module({
   controllers: [PageController],
   providers: [PageService],
+  exports: [PageService],
 })
 export class PageModule {}

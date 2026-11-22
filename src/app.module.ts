@@ -4,6 +4,8 @@ import { APP_INTERCEPTOR } from "@nestjs/core";
 import { AppController } from "./app.controller.js";
 import { AppService } from "./app.service.js";
 import { AuthModule } from "./auth/auth.module.js";
+import { ContactModule } from "./contact/contact.module.js";
+import { LocationModule } from "./location/location.module.js";
 import { MediaModule } from "./media/media.module.js";
 import { PageModule } from "./page/page.module.js";
 import { SolutionModule } from "./solution/solution.module.js";
@@ -16,6 +18,8 @@ import { PrismaModule } from "./prisma/prisma.module.js";
     ConfigModule.forRoot({ isGlobal: true, validationSchema: envSchema }),
     PrismaModule,
     AuthModule,
+    ContactModule,
+    LocationModule,
     MediaModule,
     SolutionModule,
     PageModule,

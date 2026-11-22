@@ -327,6 +327,68 @@ export const SeoFields = z.strictObject({
 });
 export type SeoFields = z.infer<typeof SeoFields>;
 
+// Accept what GET returns: wherever a write expects an `*imageId` string,
+// an image object `{ id, ... }` (or array of them) is unwrapped to its id.
+// Lets an admin UI GET a page, edit text, and POST it back verbatim.
+const idOf = (v: unknown): string | undefined =>
+  typeof v === "string"
+    ? v
+    : v !== null &&
+        typeof v === "object" &&
+        typeof (v as { id?: unknown }).id === "string"
+      ? (v as { id: string }).id
+      : undefined;
+
+function normalizeContent(content: Record<string, any>): Record<string, any> {
+  const out = { ...content };
+  const take = (objKey: string, idKey: string) => {
+    if (out[objKey] !== undefined) {
+      const id = idOf(out[objKey]);
+      delete out[objKey];
+      if (id !== undefined) out[idKey] = id;
+    }
+  };
+  take("image", "imageId");
+  take("media", "mediaId");
+  take("backgroundImage", "backgroundImageId");
+  take("ogImage", "ogImageId");
+  if (Array.isArray(out.badges)) {
+    out.badgeIds = out.badges
+      .map((b: unknown) => idOf(b))
+      .filter((x): x is string => x !== undefined);
+    delete out.badges;
+  }
+  for (const key of ["slides", "cards", "items", "stats"]) {
+    if (Array.isArray(out[key])) {
+      out[key] = out[key].map((x: unknown) =>
+        x !== null && typeof x === "object"
+          ? normalizeContent(x as Record<string, any>)
+          : x,
+      );
+    }
+  }
+  return out;
+}
+
+const normalizeSections = (v: unknown) =>
+  Array.isArray(v)
+    ? v.map((s) =>
+        s !== null && typeof s === "object" && "content" in s
+          ? {
+              ...(s as Record<string, any>),
+              content: normalizeContent(
+                (s as { content: Record<string, any> }).content ?? {},
+              ),
+            }
+          : s,
+      )
+    : v;
+
+const normalizeSeo = (v: unknown) =>
+  v !== null && typeof v === "object"
+    ? normalizeContent(v as Record<string, any>)
+    : v;
+
 export const Create = z.strictObject({
   type: PageType,
   variant: PageVariant.nullable().optional(),
@@ -346,8 +408,8 @@ export const Create = z.strictObject({
   status: ContentStatus.optional(),
   parentId: objectIdSchema.nullable().optional(),
   sortOrder: z.number().int().min(0).optional(),
-  seo: SeoFields,
-  sections: z.array(Section).default([]),
+  seo: z.preprocess(normalizeSeo, SeoFields),
+  sections: z.preprocess(normalizeSections, z.array(Section)).default([]),
   publishedAt: z.iso.datetime().nullable().optional(),
 });
 export type Create = z.infer<typeof Create>;
