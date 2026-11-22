@@ -27,8 +27,10 @@ type StoredSection = {
   content: Record<string, any>;
 };
 
-const isOid = (v: unknown): v is string =>
-  typeof v === "string" && /^[a-f\d]{24}$/i.test(v);
+// Content stores plain image URL strings (no relations). Any non-empty
+// string found at a known media-ref path is a candidate for resolution.
+const isMediaRef = (v: unknown): v is string =>
+  typeof v === "string" && v.trim().length > 0;
 
 type Img = (id: string) => ImageObject | null;
 
@@ -114,9 +116,9 @@ export class PageService {
   constructor(private readonly prisma: PrismaService) {}
 
   private async withResolvedImages(rows: PageRow[]) {
-    const ids = new Set<string>();
+    const urls = new Set<string>();
     const collect = (v: unknown) => {
-      if (isOid(v)) ids.add(v);
+      if (isMediaRef(v)) urls.add(v);
     };
     for (const row of rows) {
       collect((row.seo as { ogImageId?: unknown } | null)?.ogImageId);
@@ -149,11 +151,11 @@ export class PageService {
       }
     }
     const media =
-      ids.size > 0
-        ? await this.prisma.media.findMany({ where: { id: { in: [...ids] } } })
+      urls.size > 0
+        ? await this.prisma.media.findMany({ where: { src: { in: [...urls] } } })
         : [];
-    const byId = new Map(media.map((m) => [m.id, toImageObject(m)]));
-    const img: Img = (id) => byId.get(id) ?? null;
+    const bySrc = new Map(media.map((m) => [m.src, toImageObject(m)]));
+    const img: Img = (ref) => bySrc.get(ref) ?? { id: null, link: ref };
     return rows.map((row) => {
       const { ogImageId, ...seoRest } = (row.seo ?? {}) as Record<string, any>;
       return {

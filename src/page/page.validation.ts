@@ -58,8 +58,8 @@ export type BlockType = z.infer<typeof BlockType>;
 // ---------------------------------------------------------------------------
 // Section contents — shapes from scraped/cms/content-model.types.ts
 // (SectionContent map). CMS keys are lowercase; Prisma BlockType is uppercase.
-// IDs embedded in content are plain non-empty strings: the scraped seed data
-// still carries legacy ids ("m002"), so ObjectId format is not enforced here.
+// IDs embedded in content are plain image URL strings (no relations).
+// Writes accept a URL string wherever a media ref is expected.
 // ---------------------------------------------------------------------------
 
 const MediaRef = z.string().trim().min(1);
@@ -327,23 +327,27 @@ export const SeoFields = z.strictObject({
 });
 export type SeoFields = z.infer<typeof SeoFields>;
 
-// Accept what GET returns: wherever a write expects an `*imageId` string,
-// an image object `{ id, ... }` (or array of them) is unwrapped to its id.
+// Accept what GET returns: wherever a write expects an image URL string,
+// an image object `{ id, link }` (or array of them) is unwrapped to its URL.
+// Prefers `link` (the stored value); falls back to `id` for legacy payloads.
 // Lets an admin UI GET a page, edit text, and POST it back verbatim.
-const idOf = (v: unknown): string | undefined =>
-  typeof v === "string"
-    ? v
-    : v !== null &&
-        typeof v === "object" &&
-        typeof (v as { id?: unknown }).id === "string"
-      ? (v as { id: string }).id
-      : undefined;
+const refOf = (v: unknown): string | undefined => {
+  if (typeof v === "string") return v;
+  if (v !== null && typeof v === "object") {
+    const obj = v as { link?: unknown; id?: unknown };
+    if (typeof obj.link === "string" && obj.link.trim().length > 0)
+      return obj.link;
+    if (typeof obj.id === "string" && obj.id.trim().length > 0)
+      return obj.id;
+  }
+  return undefined;
+};
 
 function normalizeContent(content: Record<string, any>): Record<string, any> {
   const out = { ...content };
   const take = (objKey: string, idKey: string) => {
     if (out[objKey] !== undefined) {
-      const id = idOf(out[objKey]);
+      const id = refOf(out[objKey]);
       delete out[objKey];
       if (id !== undefined) out[idKey] = id;
     }
@@ -354,7 +358,7 @@ function normalizeContent(content: Record<string, any>): Record<string, any> {
   take("ogImage", "ogImageId");
   if (Array.isArray(out.badges)) {
     out.badgeIds = out.badges
-      .map((b: unknown) => idOf(b))
+      .map((b: unknown) => refOf(b))
       .filter((x): x is string => x !== undefined);
     delete out.badges;
   }

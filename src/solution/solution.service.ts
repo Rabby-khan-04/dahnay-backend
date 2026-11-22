@@ -17,18 +17,32 @@ const NOT_FOUND = [
 
 const MEDIA_NOT_FOUND = ["Media not found", "MEDIA_NOT_FOUND"] as const;
 
-type SolutionWithImage = Prisma.SolutionGetPayload<{
-  include: { image: true };
-}>;
+type SolutionRow = Prisma.SolutionGetPayload<Record<string, never>>;
 
-const withImageObject = ({
-  imageId,
-  image,
-  ...rest
-}: SolutionWithImage) => ({
-  ...rest,
-  image: image ? toImageObject(image) : null,
-});
+type Img = (url: string) => { id: string | null; link: string };
+
+async function collectUrls(
+  prisma: PrismaService,
+  rows: SolutionRow[],
+): Promise<Map<string, { id: string | null; link: string }>> {
+  const urls = new Set<string>();
+  const take = (v: unknown) => {
+    if (typeof v === "string" && v.trim().length > 0) urls.add(v);
+  };
+  for (const r of rows) {
+    take(r.bannerImg);
+    take(r.overview?.img);
+    r.service?.services.forEach((s) => take(s.img));
+    r.experties?.features.forEach((f) => take(f.img));
+    r.whyUs?.items.forEach((i) => take(i.icon));
+    take(r.certifications?.image);
+  }
+  if (urls.size === 0) return new Map();
+  const media = await prisma.media.findMany({
+    where: { src: { in: [...urls] } },
+  });
+  return new Map(media.map((m) => [m.src, toImageObject(m)]));
+}
 
 @Injectable()
 export class SolutionService {
@@ -37,9 +51,7 @@ export class SolutionService {
   async findAll(query: SolutionDto.ListQuery) {
     const { search, sortBy, order, kind, status, ...paging } = query;
     const where: Prisma.SolutionWhereInput = {
-      ...(search
-        ? { title: { contains: search, mode: "insensitive" } }
-        : {}),
+      ...(search ? { name: { contains: search, mode: "insensitive" } } : {}),
       ...(kind ? { kind } : {}),
       ...(status ? { status } : {}),
     };
@@ -50,82 +62,42 @@ export class SolutionService {
           { [sortBy]: order } as Prisma.SolutionOrderByWithRelationInput,
           { id: order },
         ],
-        include: { image: true },
         ...pageArgs(paging),
       }),
       this.prisma.solution.count({ where }),
     ]);
-    return toPaginated(rows.map(withImageObject), total, paging);
-  }
-
-  private requireMedia(imageId: string) {
-    return orNotFound(
-      this.prisma.media.findUniqueOrThrow({ where: { id: imageId } }),
-      ...MEDIA_NOT_FOUND,
-    );
+    return toPaginated(await this.withResolvedImages(rows), total, paging);
   }
 
   async findById(id: string) {
     const item = await orNotFound(
-      this.prisma.solution.findUniqueOrThrow({
-        where: { id },
-        include: { image: true },
-      }),
+      this.prisma.solution.findUniqueOrThrow({ where: { id } }),
       ...NOT_FOUND,
     );
-    return withImageObject(item);
+    return (await this.withResolvedImages([item]))[0];
   }
 
   async create(dto: SolutionDto.Create) {
-    await this.requireMedia(dto.imageId);
-    const { imageId, detail, ...rest } = dto;
-    const data: Prisma.SolutionUncheckedCreateInput = {
-      ...rest,
-      imageId,
-      detail: {
-        intro: detail.intro,
-        sections: detail.sections.map((s) => ({
-          ...s,
-          content: s.content as Prisma.InputJsonValue,
-        })),
-      },
-    };
+    const { bannerImgFileId, ...rest } = dto;
+    await this.registerMedia(rest.bannerImg, bannerImgFileId);
     const item = await this.prisma.solution.create({
-      data,
-      include: { image: true },
+      data: rest as Prisma.SolutionUncheckedCreateInput,
     });
-    return withImageObject(item);
+    return (await this.withResolvedImages([item]))[0];
   }
 
   async update(id: string, dto: SolutionDto.Update) {
-    if (dto.imageId !== undefined) await this.requireMedia(dto.imageId);
-    const { imageId, detail, ...rest } = dto;
-    const data: Prisma.SolutionUncheckedUpdateInput = {
-      ...rest,
-      ...(imageId !== undefined ? { imageId } : {}),
-      ...(detail !== undefined
-        ? {
-            detail: {
-              intro: detail.intro,
-              sections:
-                detail.sections?.map((s) => ({
-                  ...s,
-                  content: s.content as Prisma.InputJsonValue,
-                })) ?? [],
-            },
-          }
-        : {}),
-    };
-    return orNotFound(
-      this.prisma.solution
-        .update({
-          where: { id },
-          data,
-          include: { image: true },
-        })
-        .then(withImageObject),
+    const { bannerImgFileId, ...rest } = dto;
+    if (rest.bannerImg !== undefined)
+      await this.registerMedia(rest.bannerImg, bannerImgFileId);
+    const item = await orNotFound(
+      this.prisma.solution.update({
+        where: { id },
+        data: rest as Prisma.SolutionUncheckedUpdateInput,
+      }),
       ...NOT_FOUND,
     );
+    return (await this.withResolvedImages([item]))[0];
   }
 
   async remove(id: string) {
@@ -134,5 +106,62 @@ export class SolutionService {
       ...NOT_FOUND,
     );
     return null;
+  }
+
+  private async registerMedia(src: string, fileId?: string) {
+    if (fileId !== undefined) {
+      await this.prisma.media.upsert({
+        where: { src },
+        update: { fileId },
+        create: { src, fileId },
+      });
+      return;
+    }
+    await orNotFound(
+      this.prisma.media.findUniqueOrThrow({ where: { src } }),
+      ...MEDIA_NOT_FOUND,
+    );
+  }
+
+  private async withResolvedImages(rows: SolutionRow[]) {
+    const bySrc = await collectUrls(this.prisma, rows);
+    const img: Img = (url) => bySrc.get(url) ?? { id: null, link: url };
+    return rows.map((r) => ({
+      ...r,
+      bannerImg: img(r.bannerImg),
+      overview: r.overview
+        ? { ...r.overview, img: img(r.overview.img) }
+        : r.overview,
+      service: r.service
+        ? {
+            ...r.service,
+            services: r.service.services.map((s) => ({
+              ...s,
+              img: img(s.img),
+            })),
+          }
+        : r.service,
+      experties: r.experties
+        ? {
+            ...r.experties,
+            features: r.experties.features.map((f) => ({
+              ...f,
+              img: img(f.img),
+            })),
+          }
+        : r.experties,
+      whyUs: r.whyUs
+        ? {
+            ...r.whyUs,
+            items: r.whyUs.items.map((i) => ({
+              ...i,
+              icon: img(i.icon),
+            })),
+          }
+        : r.whyUs,
+      certifications: r.certifications
+        ? { ...r.certifications, image: img(r.certifications.image) }
+        : r.certifications,
+    }));
   }
 }
