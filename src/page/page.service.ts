@@ -3,272 +3,179 @@ import type { Prisma } from "../generated/prisma/client.js";
 import { orNotFound } from "../prisma/or-not-found.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { toImageObject } from "../media/media.service.js";
-import type { ImageObject } from "../media/media.validation.js";
+import { ContactBody, HomeBody } from "./page.validation.js";
 import { PAGE_MESSAGES } from "./page.messages.js";
 import type * as PageDto from "./page.validation.js";
 
 const NOT_FOUND = [PAGE_MESSAGES.NOT_FOUND, "PAGE_NOT_FOUND"] as const;
 
-const toStoredSections = (
-  sections: PageDto.Section[],
-): Prisma.SectionCreateInput[] =>
-  sections.map((s) => ({
-    ...s,
-    content: s.content as Prisma.InputJsonValue,
-  }));
+// Output keys per page type: body fields (minus input-only companions)
+// plus row metadata. Responses contain exactly what each Item documents,
+// so a GET body posts back verbatim.
+const INPUT_ONLY = new Set(["files", "bannerImgFileId"]);
+const META_KEYS = ["id", "slug", "createdAt", "updatedAt"];
+const HOME_KEYS = [
+  ...Object.keys(HomeBody.shape).filter((k) => !INPUT_ONLY.has(k)),
+  ...META_KEYS,
+];
+const CONTACT_KEYS = [
+  ...Object.keys(ContactBody.shape).filter((k) => !INPUT_ONLY.has(k)),
+  ...META_KEYS,
+];
+
+const pick = (obj: Record<string, unknown>, keys: string[]) => {
+  const out: Record<string, unknown> = {};
+  for (const k of keys) if (k in obj) out[k] = obj[k];
+  return out;
+};
 
 type PageRow = Prisma.PageGetPayload<Record<string, never>>;
-
-type StoredSection = {
-  id: string;
-  type: string;
-  visible: boolean;
-  sortOrder: number;
-  content: Record<string, any>;
-};
-
-// Content stores plain image URL strings (no relations). Any non-empty
-// string found at a known media-ref path is a candidate for resolution.
-const isMediaRef = (v: unknown): v is string =>
-  typeof v === "string" && v.trim().length > 0;
-
-type Img = (id: string) => ImageObject | null;
-
-const withoutKey = (obj: Record<string, any>, key: string) => {
-  const { [key]: _dropped, ...rest } = obj;
-  return rest;
-};
-
-function resolveSection(section: StoredSection, img: Img): StoredSection {
-  const { content } = section;
-  switch (section.type) {
-    case "HERO":
-      return {
-        ...section,
-        content: {
-          ...content,
-          slides: (content.slides ?? []).map((s: any) => ({
-            ...withoutKey(s, "imageId"),
-            image: img(s.imageId),
-          })),
-        },
-      };
-    case "INTRO": {
-      if (content.mediaId === undefined) return section;
-      return {
-        ...section,
-        content: { ...withoutKey(content, "mediaId"), media: img(content.mediaId) },
-      };
-    }
-    case "SERVICES":
-    case "ICON_CARDS":
-      return {
-        ...section,
-        content: {
-          ...content,
-          cards: (content.cards ?? []).map((c: any) => ({
-            ...withoutKey(c, "imageId"),
-            image: img(c.imageId),
-          })),
-        },
-      };
-    case "GPTW": {
-      const { backgroundImageId, badgeIds, ...rest } = content;
-      return {
-        ...section,
-        content: {
-          ...rest,
-          ...(backgroundImageId !== undefined
-            ? { backgroundImage: img(backgroundImageId) }
-            : {}),
-          ...(badgeIds !== undefined
-            ? { badges: badgeIds.map((id: string) => img(id)) }
-            : {}),
-        },
-      };
-    }
-    case "CTA": {
-      if (content.backgroundImageId === undefined) return section;
-      return {
-        ...section,
-        content: {
-          ...withoutKey(content, "backgroundImageId"),
-          backgroundImage: img(content.backgroundImageId),
-        },
-      };
-    }
-    case "BANNER":
-    case "PROFILE":
-    case "CONTENT_BLOCK": {
-      if (content.imageId === undefined) return section;
-      return {
-        ...section,
-        content: { ...withoutKey(content, "imageId"), image: img(content.imageId) },
-      };
-    }
-    default:
-      return section;
-  }
-}
+type HomeCreate = PageDto.HomeCreate;
+type ContactCreate = PageDto.ContactCreate;
 
 @Injectable()
 export class PageService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async findHome() {
+    const item = await orNotFound(
+      this.prisma.page.findUniqueOrThrow({ where: { slug: "home" } }),
+      ...NOT_FOUND,
+    );
+    const [resolved] = await this.withResolvedImages([item]);
+    return pick(resolved as Record<string, unknown>, HOME_KEYS);
+  }
+
+  async findContact() {
+    const item = await orNotFound(
+      this.prisma.page.findUniqueOrThrow({ where: { slug: "contact" } }),
+      ...NOT_FOUND,
+    );
+    const [resolved] = await this.withResolvedImages([item]);
+    return pick(resolved as Record<string, unknown>, CONTACT_KEYS);
+  }
+
+  async upsertHome(dto: PageDto.HomeCreate) {
+    const { files, ...rest } = dto;
+    await this.registerFiles(files);
+    const { count } = await this.prisma.page.updateMany({
+      where: { slug: "home" },
+      data: rest as Prisma.PageUpdateManyMutationInput,
+    });
+    if (count === 0) {
+      const created = await this.prisma.page.create({
+        data: { ...rest, slug: "home" } as Prisma.PageUncheckedCreateInput,
+      });
+      const [resolved] = await this.withResolvedImages([created]);
+      return pick(resolved as Record<string, unknown>, HOME_KEYS);
+    }
+    return this.findHome();
+  }
+
+  async upsertContact(dto: PageDto.ContactCreate) {
+    const { files, bannerImgFileId, ...rest } = dto;
+    await this.registerFiles(files);
+    if (rest.bannerImg !== undefined)
+      await this.registerOne(rest.bannerImg, bannerImgFileId);
+    const { count } = await this.prisma.page.updateMany({
+      where: { slug: "contact" },
+      data: rest as Prisma.PageUpdateManyMutationInput,
+    });
+    if (count === 0) {
+      const created = await this.prisma.page.create({
+        data: { ...rest, slug: "contact" } as Prisma.PageUncheckedCreateInput,
+      });
+      const [resolved] = await this.withResolvedImages([created]);
+      return pick(resolved as Record<string, unknown>, CONTACT_KEYS);
+    }
+    return this.findContact();
+  }
+
+  private async registerFiles(
+    files: Array<{ src: string; fileId: string }> | undefined,
+  ) {
+    if (!files?.length) return;
+    await Promise.all(
+      files.map(({ src, fileId }) =>
+        this.prisma.media.upsert({
+          where: { src },
+          update: { fileId },
+          create: { src, fileId },
+        }),
+      ),
+    );
+  }
+
+  private async registerOne(src: string | undefined, fileId: string | undefined) {
+    if (!src || !fileId) return;
+    await this.prisma.media.upsert({
+      where: { src },
+      update: { fileId },
+      create: { src, fileId },
+    });
+  }
+
   private async withResolvedImages(rows: PageRow[]) {
     const urls = new Set<string>();
-    const collect = (v: unknown) => {
-      if (isMediaRef(v)) urls.add(v);
+    const take = (v: unknown) => {
+      if (typeof v === "string" && v.trim().length > 0) urls.add(v);
     };
-    for (const row of rows) {
-      collect((row.seo as { ogImageId?: unknown } | null)?.ogImageId);
-      for (const s of row.sections as unknown as StoredSection[]) {
-        const c = s.content;
-        switch (s.type) {
-          case "HERO":
-            c.slides?.forEach((x: any) => collect(x?.imageId));
-            break;
-          case "INTRO":
-            collect(c.mediaId);
-            break;
-          case "SERVICES":
-          case "ICON_CARDS":
-            c.cards?.forEach((x: any) => collect(x?.imageId));
-            break;
-          case "GPTW":
-            collect(c.backgroundImageId);
-            c.badgeIds?.forEach(collect);
-            break;
-          case "CTA":
-            collect(c.backgroundImageId);
-            break;
-          case "BANNER":
-          case "PROFILE":
-          case "CONTENT_BLOCK":
-            collect(c.imageId);
-            break;
-        }
-      }
+    for (const r of rows) {
+      take(r.bannerImg);
+      r.banner?.forEach((b) => take(b.image));
+      take(r.offer?.image);
+      take(r.offer?.video);
+      take(r.aboutUs?.image);
+      take(r.aboutUs?.video);
+      r.whyUs?.items.forEach((i) => take(i.icon));
+      r.info?.images.forEach(take);
+      take(r.info?.bannerImg);
+      take(r.cta?.bannerImg);
     }
     const media =
       urls.size > 0
         ? await this.prisma.media.findMany({ where: { src: { in: [...urls] } } })
         : [];
     const bySrc = new Map(media.map((m) => [m.src, toImageObject(m)]));
-    const img: Img = (ref) => bySrc.get(ref) ?? { id: null, link: ref };
-    return rows.map((row) => {
-      const { ogImageId, ...seoRest } = (row.seo ?? {}) as Record<string, any>;
-      return {
-        ...row,
-        seo: {
-          ...seoRest,
-          ...(ogImageId !== undefined && ogImageId !== null
-            ? { ogImage: img(ogImageId) }
-            : {}),
-        },
-        sections: (row.sections as unknown as StoredSection[]).map((s) =>
-          resolveSection(s, img),
-        ),
-      };
-    });
-  }
-
-  async findAll(query: PageDto.ListQuery) {
-    const { search, sortBy, order, type, status } = query;
-    const where: Prisma.PageWhereInput = {
-      ...(search
-        ? { title: { contains: search, mode: "insensitive" } }
-        : {}),
-      ...(type ? { type } : {}),
-      ...(status ? { status } : {}),
-    };
-    return this.withResolvedImages(
-      await this.prisma.page.findMany({
-        where,
-        orderBy: [
-          { [sortBy]: order } as Prisma.PageOrderByWithRelationInput,
-          { id: order },
-        ],
-      }),
-    );
-  }
-
-  async findById(id: string) {
-    const item = await orNotFound(
-      this.prisma.page.findUniqueOrThrow({ where: { id } }),
-      ...NOT_FOUND,
-    );
-    return (await this.withResolvedImages([item]))[0];
-  }
-
-  async findByPath(path: string) {
-    const item = await orNotFound(
-      this.prisma.page.findUniqueOrThrow({ where: { path } }),
-      ...NOT_FOUND,
-    );
-    return (await this.withResolvedImages([item]))[0];
-  }
-
-  async upsertByPath(path: string, dto: PageDto.Upsert) {
-    const { parentId, sections, ...rest } = dto;
-    const storedSections = toStoredSections(sections);
-    const existing = await this.prisma.page.findUnique({
-      where: { path },
-    });
-    if (!existing) {
-      const data: Prisma.PageUncheckedCreateInput = {
-        ...rest,
-        path,
-        ...(parentId !== undefined ? { parentId } : {}),
-        sections: storedSections,
-      };
-      const created = await this.prisma.page.create({ data });
-      return (await this.withResolvedImages([created]))[0];
-    }
-    const data: Prisma.PageUncheckedUpdateInput = {
-      ...rest,
-      ...(parentId !== undefined ? { parentId } : {}),
-      sections: storedSections,
-    };
-    const updated = await orNotFound(
-      this.prisma.page.update({ where: { path }, data }),
-      ...NOT_FOUND,
-    );
-    return (await this.withResolvedImages([updated]))[0];
-  }
-
-  async create(dto: PageDto.Create) {
-    const { parentId, sections, ...rest } = dto;
-    const data: Prisma.PageUncheckedCreateInput = {
-      ...rest,
-      ...(parentId !== undefined ? { parentId } : {}),
-      sections: toStoredSections(sections),
-    };
-    const created = await this.prisma.page.create({ data });
-    return (await this.withResolvedImages([created]))[0];
-  }
-
-  async update(id: string, dto: PageDto.Update) {
-    const { parentId, sections, ...rest } = dto;
-    const data: Prisma.PageUncheckedUpdateInput = {
-      ...rest,
-      ...(parentId !== undefined ? { parentId } : {}),
-      ...(sections !== undefined
-        ? { sections: toStoredSections(sections) }
-        : {}),
-    };
-    const updated = await orNotFound(
-      this.prisma.page.update({ where: { id }, data }),
-      ...NOT_FOUND,
-    );
-    return (await this.withResolvedImages([updated]))[0];
-  }
-
-  async remove(id: string) {
-    await orNotFound(
-      this.prisma.page.delete({ where: { id } }),
-      ...NOT_FOUND,
-    );
-    return null;
+    const img = (url: string | null | undefined) =>
+      url ? (bySrc.get(url) ?? { id: null, link: url }) : null;
+    const imgs = (urls: string[] | null | undefined) =>
+      (urls ?? []).map((u) => bySrc.get(u) ?? { id: null, link: u });
+    return rows.map((r) => ({
+      ...r,
+      bannerImg: r.bannerImg ? img(r.bannerImg) : null,
+      banner: (r.banner ?? []).map((b) => ({ ...b, image: img(b.image) })),
+      offer: r.offer
+        ? {
+            ...r.offer,
+            image: r.offer.image ? img(r.offer.image) : null,
+            video: r.offer.video ? img(r.offer.video) : null,
+          }
+        : null,
+      solutions: r.solutions ?? null,
+      aboutUs: r.aboutUs
+        ? {
+            ...r.aboutUs,
+            video: img(r.aboutUs.video),
+            image: img(r.aboutUs.image),
+          }
+        : null,
+      whyUs: r.whyUs
+        ? {
+            ...r.whyUs,
+            items: r.whyUs.items.map((i) => ({ ...i, icon: img(i.icon) })),
+          }
+        : null,
+      info: r.info
+        ? {
+            ...r.info,
+            images: imgs(r.info.images),
+            bannerImg: img(r.info.bannerImg),
+          }
+        : null,
+      cta: r.cta ? { ...r.cta, bannerImg: img(r.cta.bannerImg) } : null,
+      faq: r.faq ?? null,
+      counter: r.counter ?? [],
+    }));
   }
 }

@@ -5,7 +5,9 @@ import { AppController } from "./app.controller.js";
 import { AppService } from "./app.service.js";
 import { AuthModule } from "./auth/auth.module.js";
 import { AboutModule } from "./about/about.module.js";
+import { ArticleModule } from "./article/article.module.js";
 import { ContactModule } from "./contact/contact.module.js";
+import { HomeModule } from "./home/home.module.js";
 import { IndustryModule } from "./industry/industry.module.js";
 import { LocationModule } from "./location/location.module.js";
 import { PageModule } from "./page/page.module.js";
@@ -20,7 +22,9 @@ import { PrismaModule } from "./prisma/prisma.module.js";
     PrismaModule,
     AuthModule,
     AboutModule,
+    ArticleModule,
     ContactModule,
+    HomeModule,
     IndustryModule,
     LocationModule,
     SolutionModule,

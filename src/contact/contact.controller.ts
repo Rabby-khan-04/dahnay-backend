@@ -8,8 +8,6 @@ import { PAGE_MESSAGES } from "../page/page.messages.js";
 import { PageService } from "../page/page.service.js";
 import * as PageDto from "../page/page.validation.js";
 
-const CONTACT_PATH = "/contact";
-
 @ApiTags("contact")
 @ApiCookieAuth("access_token")
 @Controller("contact")
@@ -20,9 +18,9 @@ export class ContactController {
   @Get()
   @ResponseMessage(PAGE_MESSAGES.FETCHED)
   @ApiOperation({ summary: "Get the contact page content" })
-  @ApiEnvelope(PageDto.Item)
+  @ApiEnvelope(PageDto.ContactItem)
   get() {
-    return this.pages.findByPath(CONTACT_PATH);
+    return this.pages.findContact();
   }
 
   @Post()
@@ -30,8 +28,8 @@ export class ContactController {
   @Roles("ADMIN")
   @ResponseMessage(PAGE_MESSAGES.UPSERTED)
   @ApiOperation({ summary: "Create or replace the contact page content" })
-  @ApiEnvelope(PageDto.Item)
-  save(@Body({ schema: PageDto.Upsert }) dto: PageDto.Upsert) {
-    return this.pages.upsertByPath(CONTACT_PATH, dto);
+  @ApiEnvelope(PageDto.ContactItem)
+  save(@Body({ schema: PageDto.ContactCreate }) dto: PageDto.ContactCreate) {
+    return this.pages.upsertContact(dto);
   }
 }

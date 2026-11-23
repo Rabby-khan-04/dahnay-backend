@@ -4,74 +4,70 @@ import { Public } from "../auth/decorators/public.decorator.js";
 import { Roles } from "../auth/decorators/roles.decorator.js";
 import { ResponseMessage } from "../common/decorators/response-message.decorator.js";
 import { ApiEnvelope } from "../common/swagger/api-envelope.decorator.js";
-import { PAGE_MESSAGES } from "../page/page.messages.js";
-import { PageService } from "../page/page.service.js";
-import * as PageDto from "../page/page.validation.js";
-
-const ABOUT_PATH = "/about";
-const ESG_CSR_PATH = "/esg-csr";
-const CAREERS_PATH = "/careers";
+import { ABOUT_MESSAGES } from "./about.messages.js";
+import { AboutPageService } from "./about.service.js";
+import * as AboutDto from "./about.validation.js";
 
 @ApiTags("about")
 @ApiCookieAuth("access_token")
 @Controller()
 export class AboutController {
-  constructor(private readonly pages: PageService) {}
+  constructor(private readonly pages: AboutPageService) {}
 
   @Public()
-  @Get(ABOUT_PATH)
-  @ResponseMessage(PAGE_MESSAGES.FETCHED)
+  @Get("about")
+  @ResponseMessage(ABOUT_MESSAGES.FETCHED)
   @ApiOperation({ summary: "Get the about page content" })
-  @ApiEnvelope(PageDto.Item)
+  @ApiEnvelope(AboutDto.Item)
   getAbout() {
-    return this.pages.findByPath(ABOUT_PATH);
+    return this.pages.findByType("ABOUT");
   }
 
-  @Post(ABOUT_PATH)
+  @Post("about")
   @HttpCode(200)
   @Roles("ADMIN")
-  @ResponseMessage(PAGE_MESSAGES.UPSERTED)
+  @ResponseMessage(ABOUT_MESSAGES.UPSERTED)
   @ApiOperation({ summary: "Create or replace the about page content" })
-  @ApiEnvelope(PageDto.Item)
-  saveAbout(@Body({ schema: PageDto.Upsert }) dto: PageDto.Upsert) {
-    return this.pages.upsertByPath(ABOUT_PATH, dto);
+  @ApiEnvelope(AboutDto.Item)
+  saveAbout(@Body({ schema: AboutDto.AboutCreate }) dto: AboutDto.AboutCreate) {
+    return this.pages.upsertByType("ABOUT", dto);
   }
 
   @Public()
-  @Get(ESG_CSR_PATH)
-  @ResponseMessage(PAGE_MESSAGES.FETCHED)
+  @Get("esg-csr")
+  @ResponseMessage(ABOUT_MESSAGES.FETCHED)
   @ApiOperation({ summary: "Get the ESG/CSR page content" })
-  @ApiEnvelope(PageDto.Item)
+  @ApiEnvelope(AboutDto.Item)
   getEsgCsr() {
-    return this.pages.findByPath(ESG_CSR_PATH);
+    return this.pages.findByType("ESG_CSR");
   }
 
-  @Post(ESG_CSR_PATH)
+  @Post("esg-csr")
   @HttpCode(200)
   @Roles("ADMIN")
-  @ResponseMessage(PAGE_MESSAGES.UPSERTED)
+  @ResponseMessage(ABOUT_MESSAGES.UPSERTED)
   @ApiOperation({ summary: "Create or replace the ESG/CSR page content" })
-  @ApiEnvelope(PageDto.Item)
-  saveEsgCsr(@Body({ schema: PageDto.Upsert }) dto: PageDto.Upsert) {
-    return this.pages.upsertByPath(ESG_CSR_PATH, dto);
+  @ApiEnvelope(AboutDto.Item)
+  saveEsgCsr(@Body({ schema: AboutDto.EsgCsrCreate }) dto: AboutDto.EsgCsrCreate) {
+    return this.pages.upsertByType("ESG_CSR", dto);
   }
 
   @Public()
-  @Get(CAREERS_PATH)
-  @ResponseMessage(PAGE_MESSAGES.FETCHED)
+  @Get("careers")
+  @ResponseMessage(ABOUT_MESSAGES.FETCHED)
   @ApiOperation({ summary: "Get the careers page content" })
-  @ApiEnvelope(PageDto.Item)
+  @ApiEnvelope(AboutDto.Item)
   getCareers() {
-    return this.pages.findByPath(CAREERS_PATH);
+    return this.pages.findByType("CAREERS");
   }
 
-  @Post(CAREERS_PATH)
+  @Post("careers")
   @HttpCode(200)
   @Roles("ADMIN")
-  @ResponseMessage(PAGE_MESSAGES.UPSERTED)
+  @ResponseMessage(ABOUT_MESSAGES.UPSERTED)
   @ApiOperation({ summary: "Create or replace the careers page content" })
-  @ApiEnvelope(PageDto.Item)
-  saveCareers(@Body({ schema: PageDto.Upsert }) dto: PageDto.Upsert) {
-    return this.pages.upsertByPath(CAREERS_PATH, dto);
+  @ApiEnvelope(AboutDto.Item)
+  saveCareers(@Body({ schema: AboutDto.CareersCreate }) dto: AboutDto.CareersCreate) {
+    return this.pages.upsertByType("CAREERS", dto);
   }
 }

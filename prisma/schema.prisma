@@ -32,27 +32,6 @@ enum Role {
   ADMIN
 }
 
-enum PageType {
-  HOME
-  SOLUTION
-  ABOUT
-  NEWSROOM
-  CONTACT
-  INDUSTRY
-}
-
-enum PageVariant {
-  LOGISTICS
-  LINES
-  PORTS_INFRA
-  WHO_WE_ARE
-  ESG_CSR
-  CAREERS
-  BLOG
-  CASE_STUDY
-  NEWS
-}
-
 enum ContentStatus {
   DRAFT
   PUBLISHED
@@ -70,40 +49,15 @@ enum ArticleType {
   NEWS
 }
 
-enum BlockType {
-  HERO
-  INTRO
-  SERVICES
-  INDUSTRIES
-  ICON_CARDS
-  GPTW
-  NEWSROOM
-  CTA
-  FAQ
-  CONTACT_FORM
-  BANNER
-  SOLUTION_GRID
-  FEATURE_LIST
-  PROFILE
-  CONTENT_BLOCK
-  CAREER_FORM
-  ARTICLE_LIST
-  NEWSLETTER_CTA
-  CONTACT_STATS
-  OFFICE_LIST
-  BREADCRUMB
-  ARTICLE_BODY
-}
-
 enum ContactKind {
   PHONE
   EMAIL
 }
 
-enum ArticleBlockType {
-  HEADING
-  PARAGRAPH
-  IMAGE
+enum AboutPageType {
+  ABOUT
+  ESG_CSR
+  CAREERS
 }
 
 // ------------------------------------------------- embedded composite types
@@ -170,17 +124,92 @@ type Stat {
   label String
 }
 
-type Section {
-  id        String
-  type      BlockType
-  visible   Boolean
-  sortOrder Int
-  content   Json // shape validated by the Zod SectionContent union
+type PageCounter {
+  count String
+  title String
 }
 
-type SolutionDetail {
-  intro    String
-  sections Section[]
+type PageBanner {
+  image       String
+  title       String
+  description String
+}
+
+type PageOffer {
+  title       String
+  description String
+  image       String?
+  video       String?
+}
+
+type PageSolutions {
+  title       String
+  description String
+}
+
+type PageAboutUs {
+  title       String
+  description String
+  video       String
+  image       String
+}
+
+type PageInfo {
+  title     String
+  images    String[]
+  bannerImg String
+}
+
+type PageCta {
+  title     String
+  bannerImg String
+}
+
+type AboutCounter {
+  number String
+  title  String
+}
+
+type AboutWhoWeAre {
+  description String
+  img         String
+  counter     AboutCounter[]
+}
+
+type AboutWhyUs {
+  title       String
+  description String
+  items       WhyUsItem[]
+}
+
+type AboutSocial {
+  type String
+  url  String
+}
+
+type AboutCeoInfo {
+  name   String
+  about  String
+  image  String
+  social AboutSocial[]
+}
+
+type AboutCta {
+  title       String
+  description String
+  img         String
+}
+
+type AboutFaq {
+  title       String
+  description String
+  faqs        FaqItem[]
+}
+
+type AboutInfoBlock {
+  title       String
+  description String
+  image       String
 }
 
 type Feature {
@@ -246,18 +275,6 @@ type IndustryFaq {
   qas         FaqItem[]
 }
 
-type ArticleBlock {
-  type    ArticleBlockType
-  level   Int?
-  text    String?
-  imageId String? // ObjectId as string (embedded)
-  alt     String?
-}
-
-type ArticleDetail {
-  body ArticleBlock[]
-}
-
 type OfficeContact {
   type  ContactKind
   value String
@@ -275,26 +292,48 @@ model Media {
 }
 
 /// Real pages only (home, 3 solutions, 3 about, 3 newsroom, contact, industries).
+/// Home + contact pages — one row per slug with fixed blocks.
+/// Top-level image fields are plain URL strings (no relations).
 model Page {
-  id          String        @id @default(auto()) @map("_id") @db.ObjectId
-  type        PageType
-  variant     PageVariant?
-  slug        String
-  path        String        @unique
-  title       String
-  status      ContentStatus @default(DRAFT)
-  parentId    String?       @db.ObjectId
-  parent      Page?         @relation("PageHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  children    Page[]        @relation("PageHierarchy")
-  sortOrder   Int           @default(0)
-  seo         SeoFields
-  sections    Section[]
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  publishedAt DateTime?
+  id        String         @id @default(auto()) @map("_id") @db.ObjectId
+  slug      String         @unique
+  bannerImg String?
+  counter   PageCounter[]
+  banner    PageBanner[]
+  offer     PageOffer?
+  solutions PageSolutions?
+  aboutUs   PageAboutUs?
+  whyUs     AboutWhyUs?
+  info      PageInfo?
+  cta       PageCta?
+  faq       AboutFaq?
+  status    ContentStatus  @default(DRAFT)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
 
-  @@unique([type, slug])
-  @@index([status, sortOrder])
+/// About pages (about / esg-csr / careers) — one row per type, fixed shapes
+/// per page instead of generic sections. Top-level image fields are plain
+/// URL strings; covers must exist in Media (or arrive with a fileId
+/// companion to register).
+model AboutPage {
+  id          String           @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  type        AboutPageType    @unique
+  slug        String           @unique
+  image       String
+  title       String?
+  description String?
+  whoWeAre    AboutWhoWeAre?
+  whyUs       AboutWhyUs?
+  ceoInfo     AboutCeoInfo?
+  cta         AboutCta?
+  faq         AboutFaq?
+  infoBlock   AboutInfoBlock[]
+  bannerImg   String?
+  status      ContentStatus    @default(DRAFT)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 }
 
 /// One data table for all solution kinds; listing pages filter by `kind`.
@@ -321,22 +360,19 @@ model Solution {
   @@index([kind, status])
 }
 
-/// One data table for blog / case-study / news; detail resolved by (type, slug).
+/// Blog / case-study / news posts; flat content rows resolved by (type, slug).
+/// blogImg is a plain URL string; covers must exist in Media (or arrive
+/// with blogImgFileId to register).
 model Article {
   id          String        @id @default(auto()) @map("_id") @db.ObjectId
   type        ArticleType
   slug        String
   title       String
   excerpt     String
-  cover       String
-  badge       String?
-  publishedAt DateTime?
-  modifiedAt  DateTime?
-  author      String?
-  tags        String[]
-  detail      ArticleDetail
+  blogImg     String
+  content     String
   status      ContentStatus @default(DRAFT)
-  sortOrder   Int           @default(0)
+  publishedAt DateTime
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   industries  Industry[]    @relation("CaseStudy")
